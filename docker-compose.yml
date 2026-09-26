@@ -1,23 +1,42 @@
 services:
 
+  postgres:
+    image: postgres:18
+    container_name: enterprise-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 1105
+      POSTGRES_DB: enterprise_task_manager
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d enterprise_task_manager"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   redis:
     image: redis:7
-    container_name: redis
+    container_name: enterprise-redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
 
   kafka:
     image: apache/kafka:latest
-    container_name: kafka
+    container_name: enterprise-kafka
     ports:
       - "9092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -26,7 +45,7 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.7.3
-    container_name: keycloak
+    container_name: enterprise-keycloak
     ports:
       - "8080:8080"
     environment:
@@ -36,7 +55,7 @@ services:
 
   minio:
     image: minio/minio:latest
-    container_name: minio
+    container_name: enterprise-minio
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -44,3 +63,55 @@ services:
       MINIO_ROOT_USER: admin
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  opensearch:
+    image: opensearchproject/opensearch:3.8.0
+    container_name: enterprise-opensearch
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+
+  backend:
+    build:
+      context: ./backend
+    container_name: enterprise-backend-compose
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://postgres:1105@postgres:5432/enterprise_task_manager
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKER: kafka:9092
+      KEYCLOAK_URL: http://keycloak:8080
+      OPENSEARCH_URL: http://opensearch:9200
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
+      keycloak:
+        condition: service_started
+      opensearch:
+        condition: service_started
+
+  gateway:
+    image: nginx:alpine
+    container_name: enterprise-gateway
+    ports:
+      - "8088:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

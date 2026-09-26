@@ -67,8 +67,12 @@ struct Claims {
 struct ApiDoc;
 
 
-const JWKS_URL: &str =
-    "http://localhost:8080/realms/enterprise-task-manager/protocol/openid-connect/certs";
+fn jwks_url() -> String {
+    format!("{}/realms/enterprise-task-manager/protocol/openid-connect/certs",
+        std::env::var("KEYCLOAK_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string())
+    )
+}
 
 
 #[derive(Debug, Deserialize)]
@@ -89,7 +93,7 @@ async fn get_jwks() -> Result<Jwks, String> {
     let client = Client::new();
 
     client
-        .get(JWKS_URL)
+        .get(jwks_url())
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -487,9 +491,7 @@ async fn start_kafka_consumer() -> Result<(), String> {
 #[tokio::main]
 async fn main() {
 
-    dotenv()
-        .expect("Failed to load .env file");
-
+    dotenv().ok();
 
     // --------------------------------------------------
     // PostgreSQL
@@ -682,3 +684,5 @@ mod tests {
         );
     }
 }
+
+
